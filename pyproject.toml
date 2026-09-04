@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synapse-agent"
+version = "0.1.0"
+description = "AI-powered coding agent CLI with optional Telegram interface"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "python-dotenv>=1.0,<2",
+    "questionary>=2.0,<3",
+    "rich>=13.7,<15",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "setuptools>=68",
+]
+
+[project.scripts]
+synapse = "synapse.__main__:_run"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["synapse*", "tui*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
