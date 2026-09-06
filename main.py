@@ -36,6 +36,8 @@ def main() -> None:
 
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("wakeup", help="Show the Synapse wakeup screen")
+    ask_parser = subparsers.add_parser("ask", help="Ask the configured AI model a question")
+    ask_parser.add_argument("question", help="Question to ask (wrap it in quotes)")
 
     project_parser = subparsers.add_parser("project", help="Manage Synapse project profiles")
     project_subparsers = project_parser.add_subparsers(dest="project_command")
@@ -55,6 +57,23 @@ def main() -> None:
     use_parser.add_argument("--path", type=_path, default=_path("."))
 
     args = parser.parse_args()
+
+    if args.command == "ask":
+        from rich.markdown import Markdown
+
+        from synapse.ask import AskError, ask_question
+        from synapse.model import ModelConfigError
+
+        try:
+            answer = ask_question(
+                args.question,
+                on_status=lambda message: Console(stderr=True).print(message, style="dim", markup=False),
+            )
+        except (AskError, ModelConfigError) as error:
+            Console(stderr=True).print(f"Error: {error}", style="red", markup=False)
+            raise SystemExit(1) from error
+        Console().print(Markdown(answer))
+        return
 
     if args.command == "wakeup":
         asyncio.run(run_wakeup())
