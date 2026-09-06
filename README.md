@@ -1,10 +1,64 @@
-# synapse
+# Synapse
 
-Synapse is a Python CLI for building an AI coding-agent workflow.
+**An AI coding assistant for your terminal, built one working milestone at a time.**
 
-Synapse provides a command-line interface, local project profiles, and a basic Ask command.
-Project profiles establish the workspace and memory namespace that later agent
-modes will use.
+Synapse is being built to help developers move from a question to a plan to a
+reviewed code change, with the project context carried through that workflow.
+The goal is a workspace-aware assistant that can explore code, remember project
+decisions, use tools, and help implement changes while keeping the developer in
+control.
+
+Today, Synapse has a working terminal interface, local project profiles, and real
+AI-powered Ask requests with OpenRouter and a Google AI Studio fallback. This
+repository is an incremental build toward the larger coding-agent workflow.
+
+## The vision
+
+Working on a codebase involves more than generating code. You need to understand
+what is already there, decide how a change should fit, carry out the work, and
+review the result. Synapse aims to bring those steps into one terminal workflow:
+
+**Understand → Plan → Implement → Review**
+
+- **Understand the project.** Ask questions grounded in the actual files,
+  structure, and constraints of a workspace.
+- **Turn a goal into a plan.** Break a task into steps that the developer can
+  inspect and choose before execution.
+- **Act with review built in.** Let an agent propose file changes and tool
+  actions, show the relevant diffs, and request approval before applying changes.
+- **Maintain continuity.** Keep useful context and decisions scoped to a project
+  so future sessions can pick up where earlier work left off.
+- **Support different ways of working.** Start in the terminal, then extend the
+  same core capabilities to coordinated workflows and a Telegram interface.
+
+These are the intended capabilities. The current Ask mode answers the question
+you supply; it does not yet inspect your codebase, edit files, or remember earlier
+questions.
+
+## What works today
+
+| Capability | Current behavior |
+| --- | --- |
+| Terminal launcher | Animated Synapse banner, workspace and configured model details, and an interactive Ask menu |
+| Project profiles | Initialize a workspace, inspect and list local profiles, and select an existing profile |
+| Ask from the CLI or TUI | Send a question to a real model and render its answer as Markdown in the terminal |
+| Provider fallback | Try OpenRouter first, then Google AI Studio when configured and needed |
+| Request visibility | Show the requested and responding models, endpoint, elapsed time, token usage when available, and readable failures |
+| Automated verification | Test requests and failure paths with mocked HTTP responses, without API charges |
+
+Answers and conversation history are not saved. Each Ask request is independent.
+Project metadata is stored locally, separately from model requests.
+
+## Building principles
+
+- **Make behavior visible.** Show which provider and model are being used, what
+  failed, and when a fallback takes over.
+- **Keep the developer in control.** As tools arrive, make proposed actions and
+  their effects reviewable.
+- **Respect project boundaries.** Build future tools and memory around an explicit
+  workspace and project identity.
+- **Keep provider choice flexible.** Separate the interface from the model client
+  so the workflow can grow beyond a single provider.
 
 ## Setup
 
@@ -31,7 +85,7 @@ In an interactive terminal, choose **Ask Mode**, type a question, and press Ente
 Answers render as Markdown, with a progress indicator while the model responds.
 You can ask more questions or type `/back` to return to the menu, then choose
 **Exit**. Ctrl+C at a prompt also goes back or exits. Each question is independent.
-When output is redirected, `wakeup` only prints the banner.
+When output is redirected, `wakeup` only prints a short wakeup message.
 
 Initialize the current folder as a Synapse project:
 
