@@ -205,12 +205,83 @@ def test_duplicate_symlink_workspace(tmp_path):
 def test_launcher_routes_project_management(monkeypatch):
     from tui import wakeup
     prompt_mock = AsyncMock()
-    prompt_mock.ask_async.side_effect = ['create', 'switch', 'details', 'rename', 'exit']
+    prompt_mock.ask_async.side_effect = ['manage', 'exit']
     monkeypatch.setattr(wakeup.questionary, 'select', lambda *args, **kwargs: prompt_mock)
     monkeypatch.setattr(wakeup, 'Console', lambda: Console(file=StringIO(), force_terminal=True))
     monkeypatch.setattr(wakeup, 'show_banner', AsyncMock())
     monkeypatch.setattr(wakeup, 'import_current_project', lambda: None)
     manager = AsyncMock()
-    monkeypatch.setattr(wakeup, 'manage_project', manager)
+    monkeypatch.setattr(wakeup, 'manage_projects', manager)
     asyncio.run(wakeup.run_wakeup())
-    assert [call.args[0] for call in manager.await_args_list] == ['create', 'switch', 'details', 'rename']
+    manager.assert_awaited_once()
+
+
+@pytest.mark.parametrize('name, folder', [('My Project', 'My_Project'), ('My.Project', 'My.Project'), ('My_Project', 'My_Project'), ('  Two   Words ', 'Two_Words')])
+def test_managed_project_folder(tmp_path, name, folder):
+    state = registry.create_project(name)
+    project = active_project(state)
+    assert Path(project.workspace_root) == tmp_path / 'core' / 'Projects' / folder
+    assert Path(project.workspace_root).is_dir()
+    assert project.name == name.strip()
+
+
+@pytest.mark.parametrize('name', ['', ' ', '../escape', '/tmp/escape', 'a/b', 'a\\b', '..', '.hidden', '---'])
+def test_invalid_project_names(name):
+    with pytest.raises(ProjectError):
+        registry.create_project(name)
+
+
+def test_existing_folder_not_overwritten():
+    root = registry.projects_directory() / 'Existing'
+    root.mkdir()
+    (root / 'keep.txt').write_text('keep')
+    with pytest.raises(ProjectError, match='already exists'):
+        registry.create_project('Existing')
+    assert (root / 'keep.txt').read_text() == 'keep'
+
+
+def test_remove_active_then_last_keeps_files():
+    first = active_project(registry.create_project('First'))
+    second = active_project(registry.create_project('Second'))
+    file = Path(second.workspace_root) / 'keep.txt'
+    file.write_text('keep')
+    registry.remove_project(second.id)
+    assert registry.current_project().id == first.id
+    assert file.read_text() == 'keep'
+    registry.remove_project(first.id)
+    assert registry.current_project() is None
+    assert Path(first.workspace_root).is_dir()
+
+
+def test_removed_legacy_not_reimported(tmp_path, monkeypatch):
+    root = workspace(tmp_path, 'old')
+    initialize_project(root)
+    monkeypatch.chdir(root)
+    registry.import_current_project()
+    registry.remove_project(registry.current_project().id)
+    registry.import_current_project()
+    assert registry.load_registry().profiles == []
+    assert (root / '.synapse' / 'projects.json').exists()
+    registry.register_project(root)
+    assert registry.current_project() is not None
+
+
+@pytest.mark.parametrize('confirmed', [False, None, True])
+def test_tui_delete_confirmation(monkeypatch, confirmed):
+    project = active_project(registry.create_project('Keep Files'))
+    prompt(monkeypatch, 'select', project.id)
+    prompt(monkeypatch, 'confirm', confirmed)
+    asyncio.run(projects.manage_project('delete', Console(file=StringIO())))
+    assert Path(project.workspace_root).is_dir()
+    assert (registry.current_project() is None) == (confirmed is True)
+
+
+def test_submenu_returns(monkeypatch):
+    selection = AsyncMock()
+    selection.ask_async.side_effect = ['details', 'back']
+    monkeypatch.setattr(projects.questionary, 'select', lambda *args, **kwargs: selection)
+    handler = AsyncMock()
+    monkeypatch.setattr(projects, 'manage_project', handler)
+    console = Console(file=StringIO())
+    asyncio.run(projects.manage_projects(console))
+    handler.assert_awaited_once_with('details', console)

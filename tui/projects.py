@@ -3,7 +3,7 @@ from pathlib import Path
 import questionary
 from rich.text import Text
 
-from synapse.project_registry import current_project, load_registry, register_project, rename_project, switch_project
+from synapse.project_registry import current_project, load_registry, create_project, remove_project, rename_project, switch_project, projects_directory
 from synapse.projects import ProjectError
 from tui.theme import PROMPT_STYLE
 
@@ -14,12 +14,9 @@ async def manage_project(action, console):
             name = await questionary.text('Project name', style=PROMPT_STYLE).ask_async()
             if name is None:
                 return
-            path = await questionary.path('Workspace folder', default=str(Path.cwd()), only_directories=True, style=PROMPT_STYLE).ask_async()
-            if path is None:
-                return
-            register_project(Path(path), name)
+            create_project(name)
             console.print('Project created and selected.', style='green')
-        elif action == 'switch':
+        elif action in ('switch', 'delete'):
             state = load_registry()
             if not state.profiles:
                 console.print('No saved projects. Create one first.', style='yellow')
@@ -28,7 +25,16 @@ async def manage_project(action, console):
                 questionary.Choice(f"{'● ' if p.id == state.active_project_id else ''}{p.name} — {p.workspace_root}", value=p.id)
                 for p in state.profiles], style=PROMPT_STYLE).ask_async()
             if selected is not None:
-                switch_project(selected)
+                if action == 'delete':
+                    confirmed = await questionary.confirm(
+                        'Remove this project from the registry? Its folder and files will remain.',
+                        default=False, style=PROMPT_STYLE,
+                    ).ask_async()
+                    if confirmed:
+                        remove_project(selected)
+                        console.print('Project removed from registry. Files kept.', style='green')
+                else:
+                    switch_project(selected)
         elif action == 'rename':
             project = current_project()
             if project is None:
@@ -46,3 +52,18 @@ async def manage_project(action, console):
             console.print('Memory storage is not enabled yet.', style='dim')
     except ProjectError as error:
         console.print(f'Error: {error}', style='red', markup=False)
+
+
+async def manage_projects(console):
+    while True:
+        action = await questionary.select('Manage projects', choices=[
+            questionary.Choice('Create project', value='create'),
+            questionary.Choice('Switch project', value='switch'),
+            questionary.Choice('Project details', value='details'),
+            questionary.Choice('Rename project', value='rename'),
+            questionary.Choice('Delete project from registry', value='delete'),
+            questionary.Choice('Back', value='back'),
+        ], style=PROMPT_STYLE).ask_async()
+        if action in (None, 'back'):
+            return
+        await manage_project(action, console)

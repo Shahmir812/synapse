@@ -13,7 +13,7 @@ from synapse.projects import (
     active_project,
 )
 from tui.wakeup import run_wakeup
-from synapse.project_registry import (register_project, load_registry, switch_project, rename_project, import_current_project)
+from synapse.project_registry import (register_project, load_registry, switch_project, rename_project, import_current_project, create_project, remove_project)
 
 VERSION = "0.2.0"
 
@@ -58,6 +58,11 @@ def main() -> None:
     rename_parser = project_subparsers.add_parser("rename", help="Rename the active project")
     rename_parser.add_argument("name")
 
+    create_parser = project_subparsers.add_parser("create", help="Create a workspace under CORE_DIR/Projects")
+    create_parser.add_argument("name")
+    remove_parser = project_subparsers.add_parser("remove", help="Remove a profile without deleting its folder")
+    remove_parser.add_argument("project_id")
+
     args = parser.parse_args()
 
     if args.command == "ask":
@@ -85,6 +90,14 @@ def main() -> None:
     if args.command == "project":
         console = Console()
         try:
+            if args.project_command == "create":
+                state = create_project(args.name)
+                console.print(f"Created project: {active_project(state).workspace_root}", markup=False)
+                return
+            if args.project_command == "remove":
+                remove_project(args.project_id)
+                console.print("Project removed from registry. Files kept.")
+                return
             if args.project_command == "rename":
                 rename_project(args.name)
                 console.print("Project renamed.")

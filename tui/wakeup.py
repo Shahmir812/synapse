@@ -10,8 +10,8 @@ from rich.table import Table
 from rich.text import Text
 
 from synapse.projects import ProjectError
-from synapse.project_registry import current_project, import_current_project
-from tui.projects import manage_project
+from synapse.project_registry import current_project, import_current_project, projects_directory
+from tui.projects import manage_projects
 from tui.theme import ACCENT, PROMPT_STYLE, show_banner
 
 
@@ -43,6 +43,7 @@ async def run_wakeup() -> None:
     console.print("Synapse is awake.", style="dim", justify="center")
     console.print()
     try:
+        projects_directory()
         import_current_project()
     except ProjectError as error:
         console.print(str(error), style="red", markup=False)
@@ -54,10 +55,7 @@ async def run_wakeup() -> None:
             "Project launcher",
             choices=[
                 questionary.Choice("Ask Mode", value="ask"),
-                questionary.Choice("Switch project", value="switch"),
-                questionary.Choice("Create project", value="create"),
-                questionary.Choice("Project details", value="details"),
-                questionary.Choice("Rename project", value="rename"),
+                questionary.Choice("Manage projects", value="manage"),
                 questionary.Choice("Exit", value="exit"),
             ],
             style=PROMPT_STYLE,
@@ -69,6 +67,6 @@ async def run_wakeup() -> None:
             from tui.ask import run_ask_mode
             await run_ask_mode(console)
 
-        elif choice in ("switch", "create", "details", "rename"):
-            await manage_project(choice, console)
+        elif choice == "manage":
+            await manage_projects(console)
             show_workspace(console)

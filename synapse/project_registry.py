@@ -48,14 +48,16 @@ def load_registry() -> ProjectState:
         raise ProjectError(f'Cannot read project registry: {path}. Check or restore the file.') from error
 
 
-def save_registry(state: ProjectState) -> None:
+def save_registry(state: ProjectState, *, removed_workspaces: list[str] | None = None) -> None:
     path = registry_path()
     temporary = None
     try:
+        if removed_workspaces is None:
+            removed_workspaces = json.loads(path.read_text()).get('removed_workspaces', []) if path.exists() else []
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as file:
             temporary = Path(file.name)
-            json.dump({'active_project_id': state.active_project_id,
+            json.dump({'active_project_id': state.active_project_id, 'removed_workspaces': removed_workspaces,
                        'profiles': [asdict(p) for p in state.profiles]}, file, indent=2)
             file.write('\n')
         temporary.replace(path)
@@ -115,6 +117,9 @@ def register_project(path: Path, name: str | None = None, *, activate: bool = Tr
 def import_current_project(path: Path | None = None) -> None:
     root = (path or Path.cwd()).resolve()
     state = load_registry()
+    removed = json.loads(registry_path().read_text()).get('removed_workspaces', []) if registry_path().exists() else []
+    if str(root) in removed:
+        return
     if (root / '.synapse' / 'projects.json').exists() and not any(Path(p.workspace_root).resolve() == root for p in state.profiles):
         register_project(root, activate=False)
 
@@ -149,3 +154,53 @@ def current_project() -> ProjectProfile | None:
 def active_workspace() -> Path:
     project = current_project()
     return _workspace(Path(project.workspace_root)) if project else Path.cwd().resolve()
+
+
+def projects_directory() -> Path:
+    core = Path(os.environ.get('SYNAPSE_CORE_DIR') or Path(__file__).resolve().parents[1]).expanduser().resolve()
+    directory = core / 'Projects'
+    if directory.is_symlink():
+        raise ProjectError('Projects directory must not be a symlink.')
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ProjectError(f'Cannot create projects directory: {directory}') from error
+    return directory
+
+
+def create_project(name: str) -> ProjectState:
+    name = name.strip()
+    if not name or any(not (c.isalnum() or c.isspace() or c in '._-') for c in name):
+        raise ProjectError('Use letters, numbers, spaces, dots, underscores, or hyphens in project names.')
+    folder = '_'.join(name.split())
+    if folder.startswith('.') or not any(c.isalnum() for c in folder):
+        raise ProjectError('Project names must contain a letter or number and cannot start with a dot.')
+    root = projects_directory() / folder
+    state = load_registry()
+    if any(Path(p.workspace_root).resolve() == root for p in state.profiles):
+        raise ProjectError(f'Workspace already registered: {root}')
+    if root.exists() or root.is_symlink():
+        raise ProjectError(f'Folder already exists: {root}. Register it with project init, or choose another name.')
+    try:
+        root.mkdir()
+    except OSError as error:
+        raise ProjectError(f'Cannot create project folder: {root}') from error
+    return register_project(root, name)
+
+
+def remove_project(project_id: str) -> ProjectState:
+    state = load_registry()
+    project = next((p for p in state.profiles if p.id == project_id), None)
+    if project is None:
+        raise ProjectError(f'Unknown project: {project_id}')
+    remaining = [p for p in state.profiles if p.id != project_id]
+    selected = state.active_project_id
+    if selected == project_id:
+        selected = next((p.id for p in remaining if Path(p.workspace_root).is_dir()), '')
+        if not selected and remaining:
+            selected = remaining[0].id
+    removed = json.loads(registry_path().read_text()).get('removed_workspaces', [])
+    removed = sorted(set(removed + [str(Path(project.workspace_root).resolve())]))
+    result = ProjectState(selected, remaining)
+    save_registry(result, removed_workspaces=removed)
+    return result

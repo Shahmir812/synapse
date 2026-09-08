@@ -100,10 +100,30 @@ python -m synapse project status
 python -m synapse project list
 ```
 
-The launcher also provides **Create project**, **Switch project**, **Project
-details**, and **Rename project**. Creating a project registers an existing
-folder and selects it. Switching shows saved names and paths, marking the active
-project. The workspace and memory namespace appear in the launcher.
+The launcher has one **Manage projects** submenu containing Create, Switch,
+Details, Rename, Delete, and Back.
+
+**Create project** asks for a name and creates its workspace at
+`CORE_DIR/Projects/<name>`. `CORE_DIR` defaults to the Synapse application root
+(the folder containing `main.py` in this checkout). Set `SYNAPSE_CORE_DIR` to
+choose a different base folder. The `Projects` directory is created if needed.
+Whitespace becomes underscores: `My Project` becomes `Projects/My_Project`.
+Dots and underscores already in the name are preserved. Path separators and
+hidden/traversal names are rejected. Existing folders are never overwritten.
+
+```bash
+python -m synapse project create "My Project"
+python -m synapse project remove PROJECT_ID
+```
+
+**Delete project from registry** removes only the saved profile, after confirmation
+in the TUI. The workspace and all its files remain on disk. Removing the active
+project selects another saved project (preferring an existing workspace); removing
+the last one clears selection. Removed legacy profiles are not automatically
+re-imported. You can explicitly register their folders again with `project init`.
+Renaming changes only the display name, preserving the workspace path and identity.
+Existing projects remain in their original locations. `project init` remains the
+way to register an existing folder without creating or moving it.
 
 Register another workspace or select and rename a saved project from the CLI:
 

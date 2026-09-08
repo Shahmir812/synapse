@@ -16,3 +16,6 @@ synapse output/
 *.log
 *_report.json
 *_report.md
+
+# User project workspaces
+/Projects/
