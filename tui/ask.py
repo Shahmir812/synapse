@@ -13,6 +13,8 @@ from tui.theme import ACCENT, PROMPT_STYLE
 
 from synapse.ask import AskError, ask_question
 from synapse.model import ModelConfigError
+from synapse.projects import ProjectError
+from synapse.project_registry import active_workspace
 from synapse.file_context import FileContextError, selectable_files
 
 
@@ -29,6 +31,12 @@ async def run_ask_mode(console: Console) -> None:
         if not question.strip():
             console.print("Please enter a question.", style="yellow")
             continue
+        try:
+            workspace = active_workspace()
+        except ProjectError as error:
+            console.print(str(error), style="red", markup=False)
+            return
+        console.print(f"Workspace: {workspace}", style="dim", markup=False)
         attach = await questionary.confirm(
             "Attach workspace files?", default=False, style=PROMPT_STYLE,
         ).ask_async()
@@ -37,7 +45,7 @@ async def run_ask_mode(console: Console) -> None:
         files = []
         if attach:
             with console.status("Finding text files…", spinner_style=ACCENT):
-                candidates, truncated = await asyncio.to_thread(selectable_files)
+                candidates, truncated = await asyncio.to_thread(selectable_files, workspace)
             if truncated:
                 console.print("File list limited. Use CLI --file for files not shown.", style="yellow")
             if not candidates:
@@ -55,7 +63,7 @@ async def run_ask_mode(console: Console) -> None:
                     ask_question, question.strip(), files=files,
                     on_status=lambda message: console.print(message, style="dim", markup=False),
                 )
-        except (AskError, ModelConfigError, FileContextError) as error:
+        except (AskError, ModelConfigError, FileContextError, ProjectError) as error:
             console.print(f"Error: {error}", style="red", markup=False)
             continue
         console.print()

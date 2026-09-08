@@ -77,7 +77,7 @@ def test_tui_selects_multiple_files_and_resets_each_question(monkeypatch):
     prompt_sequence(monkeypatch, ask, 'text', ['First', 'Second', '/back'])
     prompt_sequence(monkeypatch, ask, 'confirm', [True, False])
     prompt_sequence(monkeypatch, ask, 'checkbox', [['a.py', 'b.py']])
-    monkeypatch.setattr(ask, 'selectable_files', lambda: (['a.py', 'b.py'], False))
+    monkeypatch.setattr(ask, 'selectable_files', lambda *args: (['a.py', 'b.py'], False))
     requests = []
     def answer(question, **kwargs):
         requests.append((question, kwargs['files']))
@@ -92,7 +92,7 @@ def test_cancel_attachment_does_not_send(monkeypatch, step):
     prompt_sequence(monkeypatch, ask, 'text', ['Question', '/back'])
     prompt_sequence(monkeypatch, ask, 'confirm', [None if step == 'confirm' else True])
     prompt_sequence(monkeypatch, ask, 'checkbox', [None])
-    monkeypatch.setattr(ask, 'selectable_files', lambda: ([] if step == 'no_files' else ['a.py'], False))
+    monkeypatch.setattr(ask, 'selectable_files', lambda *args: ([] if step == 'no_files' else ['a.py'], False))
     monkeypatch.setattr(ask, 'ask_question', lambda *args, **kwargs: pytest.fail('Cancelled request sent'))
     asyncio.run(ask.run_ask_mode(Console(file=StringIO())))
 
@@ -101,7 +101,7 @@ def test_empty_selection_sends_question_only(monkeypatch):
     prompt_sequence(monkeypatch, ask, 'text', ['Question', '/back'])
     prompt_sequence(monkeypatch, ask, 'confirm', [True])
     prompt_sequence(monkeypatch, ask, 'checkbox', [[]])
-    monkeypatch.setattr(ask, 'selectable_files', lambda: (['a.py'], True))
+    monkeypatch.setattr(ask, 'selectable_files', lambda *args: (['a.py'], True))
     def answer(question, **kwargs):
         assert kwargs['files'] == []
         return 'Answer'

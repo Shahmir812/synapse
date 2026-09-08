@@ -11,12 +11,9 @@ from rich.table import Table
 from synapse.projects import (
     ProjectError,
     active_project,
-    initialize_project,
-    read_project_state,
-    save_project_state,
-    select_project,
 )
 from tui.wakeup import run_wakeup
+from synapse.project_registry import (register_project, load_registry, switch_project, rename_project, import_current_project)
 
 VERSION = "0.2.0"
 
@@ -44,7 +41,7 @@ def main() -> None:
     project_parser = subparsers.add_parser("project", help="Manage Synapse project profiles")
     project_subparsers = project_parser.add_subparsers(dest="project_command")
 
-    init_parser = project_subparsers.add_parser("init", help="Initialize a project in a folder")
+    init_parser = project_subparsers.add_parser("init", help="Register a workspace and select it as the active project")
     init_parser.add_argument("path", nargs="?", type=_path, default=_path("."))
     init_parser.add_argument("--name", help="Human-readable project name")
 
@@ -57,6 +54,9 @@ def main() -> None:
     use_parser = project_subparsers.add_parser("use", help="Select the active project profile")
     use_parser.add_argument("project_id")
     use_parser.add_argument("--path", type=_path, default=_path("."))
+
+    rename_parser = project_subparsers.add_parser("rename", help="Rename the active project")
+    rename_parser.add_argument("name")
 
     args = parser.parse_args()
 
@@ -72,7 +72,7 @@ def main() -> None:
                 args.question, files=args.file,
                 on_status=lambda message: Console(stderr=True).print(message, style="dim", markup=False),
             )
-        except (AskError, ModelConfigError, FileContextError) as error:
+        except (AskError, ModelConfigError, FileContextError, ProjectError) as error:
             Console(stderr=True).print(f"Error: {error}", style="red", markup=False)
             raise SystemExit(1) from error
         Console().print(Markdown(answer))
@@ -85,14 +85,22 @@ def main() -> None:
     if args.command == "project":
         console = Console()
         try:
+            if args.project_command == "rename":
+                rename_project(args.name)
+                console.print("Project renamed.")
+                return
+            if args.project_command != "init":
+                import_current_project(args.path if hasattr(args, "path") else None)
+            if args.project_command == "status" and not load_registry().profiles:
+                raise ProjectError("No active project. Run synapse project init.")
             if args.project_command == "init":
-                state = initialize_project(args.path, args.name)
+                state = register_project(args.path, args.name)
                 project = active_project(state)
                 console.print(f"Initialized [cyan]{project.name}[/cyan] ({project.id})")
                 return
 
             if args.project_command == "status":
-                project = active_project(read_project_state(args.path))
+                project = active_project(load_registry())
                 console.print(f"Project: [cyan]{project.name}[/cyan]")
                 console.print(f"ID:      {project.id}")
                 console.print(f"Path:    [dim]{project.workspace_root}[/dim]")
@@ -100,7 +108,7 @@ def main() -> None:
                 return
 
             if args.project_command == "list":
-                state = read_project_state(args.path)
+                state = load_registry()
                 table = Table(title="Synapse projects")
                 table.add_column("Active")
                 table.add_column("Name")
@@ -117,8 +125,7 @@ def main() -> None:
                 return
 
             if args.project_command == "use":
-                state = select_project(read_project_state(args.path), args.project_id)
-                save_project_state(args.path, state)
+                state = switch_project(args.project_id)
                 console.print(f"Active project: [cyan]{active_project(state).name}[/cyan]")
                 return
         except ProjectError as error:

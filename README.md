@@ -40,7 +40,7 @@ your codebase on its own, edit files, or remember earlier questions.
 | Capability | Current behavior |
 | --- | --- |
 | Terminal launcher | Animated Synapse banner, workspace and configured model details, and an interactive Ask menu |
-| Project profiles | Initialize a workspace, inspect and list local profiles, and select an existing profile |
+| Project profiles | Create, switch, rename, and inspect projects from the CLI or TUI; share the active workspace across launches |
 | Ask from the CLI or TUI | Attach multiple workspace text files, send a question to a real model, and render its answer as Markdown in the terminal |
 | Provider fallback | Try OpenRouter first, then Google AI Studio when configured and needed |
 | Request visibility | Show the requested and responding models, endpoint, elapsed time, token usage when available, and readable failures |
@@ -87,7 +87,7 @@ You can ask more questions or type `/back` to return to the menu, then choose
 **Exit**. Ctrl+C at a prompt also goes back or exits. Each question is independent.
 When output is redirected, `wakeup` only prints a short wakeup message.
 
-Initialize the current folder as a Synapse project:
+Register the current folder as a Synapse project:
 
 ```bash
 python -m synapse project init
@@ -100,7 +100,39 @@ python -m synapse project status
 python -m synapse project list
 ```
 
-Project state is stored locally in `.synapse/projects.json` and is not committed.
+The launcher also provides **Create project**, **Switch project**, **Project
+details**, and **Rename project**. Creating a project registers an existing
+folder and selects it. Switching shows saved names and paths, marking the active
+project. The workspace and memory namespace appear in the launcher.
+
+Register another workspace or select and rename a saved project from the CLI:
+
+```bash
+python -m synapse project init ~/code/my-app --name "My App"
+python -m synapse project list
+python -m synapse project use PROJECT_ID
+python -m synapse project rename "New name"
+```
+
+Project profiles and the active selection are saved in
+`~/.synapse/projects.json`. Set `SYNAPSE_PROJECTS_FILE` to use a different registry
+file (tests use an isolated temporary registry). Selection persists across
+launches and working directories. Each workspace can be registered once; renaming
+preserves its ID, creation time, memory namespace, and memory revision.
+
+Existing workspace-local `.synapse/projects.json` profiles are imported when you
+launch the TUI from that workspace or register its folder. IDs and memory
+namespaces are preserved, and the original file is left in place. Importing a
+legacy workspace on startup does not replace an existing active selection.
+Conflicting legacy profiles are reported instead of being silently replaced.
+
+A selected project's folder must still exist before it can be used for Ask or
+selected again. If it has moved or been deleted, select another valid project.
+With no saved projects, Ask uses the current working directory. Corrupt registry
+files produce an error instead of silently changing the workspace.
+
+Memory namespaces establish the boundary for future project memory. Conversation
+storage is not implemented yet; switching projects does not load chat history.
 
 ## Ask a question
 
@@ -145,7 +177,9 @@ python -m synapse ask "How do these modules work together?" \
   --file synapse/model.py
 ```
 
-Paths are relative to the current working directory, which defines the workspace.
+Paths are relative to the active project workspace. Without a selected project,
+the current working directory defines the workspace. The TUI file picker uses
+that same workspace, even when Synapse was launched from a different folder.
 Absolute paths are accepted only when they resolve inside that workspace. Quote
 paths containing spaces. Repeated paths to the same file are included only once.
 

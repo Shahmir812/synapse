@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from time import monotonic
 from pathlib import Path
+from synapse.project_registry import active_workspace
 from synapse.file_context import load_attachments, attach_to_question
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
@@ -25,7 +26,7 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, on_sta
         raise AskError("Question must not be empty.")
 
     report = on_status or (lambda message: None)
-    attachments = load_attachments(files or [])
+    attachments = load_attachments(files or [], active_workspace())
     if attachments:
         report(f"Sending {len(attachments)} file(s) as context to the model (including fallback if needed):")
         for item in attachments:

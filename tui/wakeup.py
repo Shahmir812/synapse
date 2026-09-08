@@ -9,7 +9,9 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from synapse.projects import ProjectError, active_project, read_project_state
+from synapse.projects import ProjectError
+from synapse.project_registry import current_project, import_current_project
+from tui.projects import manage_project
 from tui.theme import ACCENT, PROMPT_STYLE, show_banner
 
 
@@ -18,11 +20,13 @@ def show_workspace(console: Console) -> None:
     details.add_column(style="dim", no_wrap=True)
     details.add_column(overflow="fold")
     try:
-        project = active_project(read_project_state(Path.cwd()))
-        details.add_row("Project", Text(project.name))
-    except ProjectError:
-        details.add_row("Project", "No project initialized · Ask is ready to use")
-    details.add_row("Workspace", Text(str(Path.cwd())))
+        project = current_project()
+        details.add_row("Project", Text(project.name if project else "No project selected"))
+        details.add_row("Workspace", Text(project.workspace_root if project else str(Path.cwd())))
+        if project:
+            details.add_row("Memory namespace", Text(project.memory_namespace))
+    except ProjectError as error:
+        details.add_row("Project error", Text(str(error)))
     primary = os.environ.get("OPENROUTER_DEFAULT_MODEL", "").strip()
     google = os.environ.get("GEMINI_MODEL", "").strip()
     details.add_row("OpenRouter", Text(primary or "Model not configured"))
@@ -38,6 +42,10 @@ async def run_wakeup() -> None:
     await show_banner(console)
     console.print("Synapse is awake.", style="dim", justify="center")
     console.print()
+    try:
+        import_current_project()
+    except ProjectError as error:
+        console.print(str(error), style="red", markup=False)
     show_workspace(console)
     console.print("↑ ↓ navigate  ·  Enter select  ·  Ctrl+C exit", style="dim")
     console.print()
@@ -46,6 +54,10 @@ async def run_wakeup() -> None:
             "Project launcher",
             choices=[
                 questionary.Choice("Ask Mode", value="ask"),
+                questionary.Choice("Switch project", value="switch"),
+                questionary.Choice("Create project", value="create"),
+                questionary.Choice("Project details", value="details"),
+                questionary.Choice("Rename project", value="rename"),
                 questionary.Choice("Exit", value="exit"),
             ],
             style=PROMPT_STYLE,
@@ -56,3 +68,7 @@ async def run_wakeup() -> None:
         if choice == "ask":
             from tui.ask import run_ask_mode
             await run_ask_mode(console)
+
+        elif choice in ("switch", "create", "details", "rename"):
+            await manage_project(choice, console)
+            show_workspace(console)
