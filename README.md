@@ -32,8 +32,8 @@ review the result. Synapse aims to bring those steps into one terminal workflow:
   same core capabilities to coordinated workflows and a Telegram interface.
 
 These are the intended capabilities. The current Ask mode answers the question
-you supply; it does not yet inspect your codebase, edit files, or remember earlier
-questions.
+you supply and can use text files you explicitly attach. It does not yet explore
+your codebase on its own, edit files, or remember earlier questions.
 
 ## What works today
 
@@ -41,7 +41,7 @@ questions.
 | --- | --- |
 | Terminal launcher | Animated Synapse banner, workspace and configured model details, and an interactive Ask menu |
 | Project profiles | Initialize a workspace, inspect and list local profiles, and select an existing profile |
-| Ask from the CLI or TUI | Send a question to a real model and render its answer as Markdown in the terminal |
+| Ask from the CLI or TUI | Attach multiple workspace text files, send a question to a real model, and render its answer as Markdown in the terminal |
 | Provider fallback | Try OpenRouter first, then Google AI Studio when configured and needed |
 | Request visibility | Show the requested and responding models, endpoint, elapsed time, token usage when available, and readable failures |
 | Automated verification | Test requests and failure paths with mocked HTTP responses, without API charges |
@@ -118,8 +118,8 @@ python -m synapse ask "Explain Python decorators with an example"
 ```
 
 Ask sends a single question to OpenRouter and displays the answer as Markdown in
-the terminal. Each request is independent: Ask does not read project files or
-save conversation history. A project profile is not required.
+the terminal. Each request is independent: Ask reads only the files you explicitly
+attach and does not save conversation history. A project profile is not required.
 
 Empty questions, missing configuration, authentication failures, timeouts, and
 other provider failures produce a readable error and a nonzero exit status for
@@ -134,6 +134,43 @@ the answer.
 Requests use a 30-second SDK timeout with automatic retries disabled.
 The `project` and `wakeup` commands do not require model configuration.
 The other settings in `.env.example` are reserved for future features.
+
+## Ask about multiple files
+
+Repeat `--file` to attach files to a single question:
+
+```bash
+python -m synapse ask "How do these modules work together?" \
+  --file synapse/ask.py \
+  --file synapse/model.py
+```
+
+Paths are relative to the current working directory, which defines the workspace.
+Absolute paths are accepted only when they resolve inside that workspace. Quote
+paths containing spaces. Repeated paths to the same file are included only once.
+
+In TUI Ask Mode, enter your question, choose **Yes** at **Attach workspace files?**,
+then use **Space** to toggle files and **Enter** to submit the selection. Choose
+**No**, or submit an empty selection, to ask without files. Cancelling an
+attachment prompt returns to the question prompt without sending a request.
+Selections apply only to the current question.
+
+Before the request, Synapse prints every attached path and its size. The selected
+files' contents are sent with your question to OpenRouter and, if needed, to the
+Google AI Studio fallback. Both receive the same snapshot. Answers are still
+rendered only in the terminal; no answer or attachment history is saved.
+
+Attachments must be UTF-8 text: at most 10 files, 64 KiB per file, and 256 KiB
+combined. Missing, unreadable, binary, and out-of-workspace files are rejected
+before contacting either provider. Common sensitive paths such as `.env*`,
+private-key files, and credential files are excluded, along with Git metadata,
+local Synapse state, and dependency/build directories. These path exclusions are
+not a secret-content detector; select only files you intend to share.
+
+The picker skips hidden directories and symlinks, and shows up to 500 eligible
+files after scanning at most 5,000 file entries. If the list is limited, use the
+CLI with explicit `--file` paths. Explicit attachments are validated again when
+the question is submitted.
 
 ## Google AI Studio fallback
 

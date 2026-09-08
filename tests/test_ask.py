@@ -222,3 +222,39 @@ def test_fallback_requires_model(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         run_cli(monkeypatch, "ask", "Hello")
     assert "Set GEMINI_MODEL" in capsys.readouterr().err
+
+
+def test_cli_multiple_files_reused_on_fallback(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'a.py').write_text('from b import helper')
+    (tmp_path / 'b.py').write_text('def helper(): return 42')
+    monkeypatch.setenv('GEMINI_API_KEY', 'google-test-key')
+    monkeypatch.setenv('GEMINI_MODEL', 'gemini-test')
+    payloads = []
+    def respond(request):
+        payloads.append(json.loads(request.content))
+        # The attachment list must have been printed before any network request.
+        output = capsys.readouterr()
+        if len(payloads) == 1:
+            assert 'a.py' in output.err and 'b.py' in output.err
+            assert 'from b import' not in output.err
+            (tmp_path / 'a.py').write_text('changed during request')
+            return httpx.Response(402, json={'error': {'message': 'credits'}})
+        return httpx.Response(200, json={'model': 'gemini-test', 'choices': [{'message': {'role': 'assistant', 'content': 'They work together.'}}]})
+    mock_provider(monkeypatch, respond)
+    run_cli(monkeypatch, 'ask', 'How do these interact?', '--file', 'a.py', '--file', 'b.py')
+    assert len(payloads) == 2
+    assert payloads[0]['messages'] == payloads[1]['messages']
+    content = payloads[0]['messages'][0]['content']
+    assert 'How do these interact?' in content
+    assert 'from b import helper' in content and 'def helper(): return 42' in content
+    assert 'changed during request' not in content
+
+
+def test_cli_bad_attachment_never_creates_client(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('GEMINI_API_KEY', 'google-test-key')
+    with pytest.raises(SystemExit) as error:
+        run_cli(monkeypatch, 'ask', 'Explain', '--file', 'missing.py')
+    assert error.value.code == 1
+    assert 'must exist inside the workspace' in capsys.readouterr().err

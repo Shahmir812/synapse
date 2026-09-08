@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from time import monotonic
+from pathlib import Path
+from synapse.file_context import load_attachments, attach_to_question
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
 
@@ -17,12 +19,18 @@ class AskError(Exception):
     """An Ask request could not produce an answer."""
 
 
-def ask_question(question: str, *, on_status: Callable[[str], None] | None = None) -> str:
+def ask_question(question: str, *, files: list[str | Path] | None = None, on_status: Callable[[str], None] | None = None) -> str:
     question = question.strip()
     if not question:
         raise AskError("Question must not be empty.")
 
     report = on_status or (lambda message: None)
+    attachments = load_attachments(files or [])
+    if attachments:
+        report(f"Sending {len(attachments)} file(s) as context to the model (including fallback if needed):")
+        for item in attachments:
+            report(f"  {item.path} ({item.size} bytes)")
+    question = attach_to_question(question, attachments)
     try:
         return _request(question, report, "OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
     except (AskError, ModelConfigError) as primary_error:

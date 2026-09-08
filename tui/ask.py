@@ -13,6 +13,7 @@ from tui.theme import ACCENT, PROMPT_STYLE
 
 from synapse.ask import AskError, ask_question
 from synapse.model import ModelConfigError
+from synapse.file_context import FileContextError, selectable_files
 
 
 async def run_ask_mode(console: Console) -> None:
@@ -28,13 +29,33 @@ async def run_ask_mode(console: Console) -> None:
         if not question.strip():
             console.print("Please enter a question.", style="yellow")
             continue
+        attach = await questionary.confirm(
+            "Attach workspace files?", default=False, style=PROMPT_STYLE,
+        ).ask_async()
+        if attach is None:
+            continue
+        files = []
+        if attach:
+            with console.status("Finding text files…", spinner_style=ACCENT):
+                candidates, truncated = await asyncio.to_thread(selectable_files)
+            if truncated:
+                console.print("File list limited. Use CLI --file for files not shown.", style="yellow")
+            if not candidates:
+                console.print("No eligible text files found. Ask again without attachments.", style="yellow")
+                continue
+            files = await questionary.checkbox(
+                "Select files (Space to toggle, Enter to continue)",
+                choices=candidates, style=PROMPT_STYLE,
+            ).ask_async()
+            if files is None:
+                continue
         try:
             with console.status("Waiting for model response…", spinner="dots", spinner_style=ACCENT):
                 answer = await asyncio.to_thread(
-                    ask_question, question.strip(),
+                    ask_question, question.strip(), files=files,
                     on_status=lambda message: console.print(message, style="dim", markup=False),
                 )
-        except (AskError, ModelConfigError) as error:
+        except (AskError, ModelConfigError, FileContextError) as error:
             console.print(f"Error: {error}", style="red", markup=False)
             continue
         console.print()
