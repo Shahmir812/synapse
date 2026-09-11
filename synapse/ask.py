@@ -1,10 +1,12 @@
-"""One question, one model response; no tools or persistent history."""
+"""Ask with optional project-scoped conversation memory."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from time import monotonic
 from pathlib import Path
+from synapse.memory import Conversation, MemoryError
+from synapse.local_memory import LocalMemoryError
 from synapse.project_registry import active_workspace
 from synapse.file_context import load_attachments, attach_to_question
 
@@ -20,7 +22,7 @@ class AskError(Exception):
     """An Ask request could not produce an answer."""
 
 
-def ask_question(question: str, *, files: list[str | Path] | None = None, on_status: Callable[[str], None] | None = None) -> str:
+def ask_question(question: str, *, files: list[str | Path] | None = None, conversation: Conversation | None = None, on_status: Callable[[str], None] | None = None) -> str:
     question = question.strip()
     if not question:
         raise AskError("Question must not be empty.")
@@ -31,21 +33,40 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, on_sta
         report(f"Sending {len(attachments)} file(s) as context to the model (including fallback if needed):")
         for item in attachments:
             report(f"  {item.path} ({item.size} bytes)")
+    original_question = question
+    history = conversation.context(question) if conversation else []
+    if conversation:
+        report(conversation.status)
+        report(f"Memory: {'temporary' if conversation.temporary else 'Honcho'} | conversation: {conversation.id}")
+        report(f"Loaded {len(history)} context messages; file attachments are not stored as messages.")
     question = attach_to_question(question, attachments)
+    # Keep the same memory snapshot through provider fallback.
+    def request(provider, factory, endpoint, model_setting, key_setting):
+        if history:
+            return _request(question, report, provider, factory, endpoint, model_setting, key_setting, history)
+        return _request(question, report, provider, factory, endpoint, model_setting, key_setting)
     try:
-        return _request(question, report, "OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
+        answer = request("OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
     except (AskError, ModelConfigError) as primary_error:
         if not gemini_is_configured():
             raise
         report(f"OpenRouter failed: {primary_error}")
         report("Falling back to Google AI Studio…")
         try:
-            return _request(question, report, "Google AI Studio", create_gemini_client, GEMINI_BASE_URL, "GEMINI_MODEL", "GEMINI_API_KEY")
+            answer = request("Google AI Studio", create_gemini_client, GEMINI_BASE_URL, "GEMINI_MODEL", "GEMINI_API_KEY")
         except (AskError, ModelConfigError) as fallback_error:
             raise AskError(f"Both providers failed. OpenRouter: {primary_error} Google AI Studio: {fallback_error}") from fallback_error
 
+    if conversation:
+        try:
+            conversation.save(original_question, answer)
+            report("Memory: exchange kept for this temporary session." if conversation.temporary else conversation.status)
+        except (MemoryError, LocalMemoryError) as error:
+            report(f"Warning: answer generated, but memory save was not confirmed. {error}")
+    return answer
 
-def _request(question, report, provider, factory, endpoint, model_setting, key_setting) -> str:
+
+def _request(question, report, provider, factory, endpoint, model_setting, key_setting, history=None) -> str:
     client, model = factory()
     started = monotonic()
     report(f"{provider}: trying model {model} ({model_setting})")
@@ -54,7 +75,7 @@ def _request(question, report, provider, factory, endpoint, model_setting, key_s
         with client:
             response = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": question}],
+                messages=(history or []) + [{"role": "user", "content": question}],
             )
     except AuthenticationError as error:
         raise AskError(f"{provider} authentication failed (HTTP 401, model {model}). Check {key_setting}.") from error

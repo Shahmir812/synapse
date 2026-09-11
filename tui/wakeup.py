@@ -27,6 +27,8 @@ def show_workspace(console: Console) -> None:
             details.add_row("Memory namespace", Text(project.memory_namespace))
     except ProjectError as error:
         details.add_row("Project error", Text(str(error)))
+    from synapse.memory import configured
+    details.add_row("Memory", "Honcho configured (connects when opening Ask)" if configured() else "SQLite local; Honcho not configured")
     primary = os.environ.get("OPENROUTER_DEFAULT_MODEL", "").strip()
     google = os.environ.get("GEMINI_MODEL", "").strip()
     details.add_row("OpenRouter", Text(primary or "Model not configured"))

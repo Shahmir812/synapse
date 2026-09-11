@@ -33,7 +33,7 @@ review the result. Synapse aims to bring those steps into one terminal workflow:
 
 These are the intended capabilities. The current Ask mode answers the question
 you supply and can use text files you explicitly attach. It does not yet explore
-your codebase on its own, edit files, or remember earlier questions.
+your codebase on its own or edit files. Honcho can retain and resume project conversations.
 
 ## What works today
 
@@ -46,7 +46,8 @@ your codebase on its own, edit files, or remember earlier questions.
 | Request visibility | Show the requested and responding models, endpoint, elapsed time, token usage when available, and readable failures |
 | Automated verification | Test requests and failure paths with mocked HTTP responses, without API charges |
 
-Answers and conversation history are not saved. Each Ask request is independent.
+Honcho conversations persist questions and answers. Temporary TUI conversations
+keep recent context only until you leave Ask mode.
 Project metadata is stored locally, separately from model requests.
 
 ## Building principles
@@ -84,7 +85,7 @@ compact banner. Set `SYNAPSE_NO_ANIMATION=1` to skip the startup animation.
 In an interactive terminal, choose **Ask Mode**, type a question, and press Enter.
 Answers render as Markdown, with a progress indicator while the model responds.
 You can ask more questions or type `/back` to return to the menu, then choose
-**Exit**. Ctrl+C at a prompt also goes back or exits. Each question is independent.
+**Exit**. Ctrl+C at a prompt also goes back or exits. Use `/conversation` to start or resume a conversation.
 When output is redirected, `wakeup` only prints a short wakeup message.
 
 Register the current folder as a Synapse project:
@@ -151,8 +152,9 @@ selected again. If it has moved or been deleted, select another valid project.
 With no saved projects, Ask uses the current working directory. Corrupt registry
 files produce an error instead of silently changing the workspace.
 
-Memory namespaces establish the boundary for future project memory. Conversation
-storage is not implemented yet; switching projects does not load chat history.
+Memory namespaces define isolated Honcho workspaces. Switching projects changes
+which conversations are available; renaming preserves access to existing memory.
+Removing a project from the local registry does not delete its remote Honcho memory.
 
 ## Ask a question
 
@@ -170,8 +172,8 @@ python -m synapse ask "Explain Python decorators with an example"
 ```
 
 Ask sends a single question to OpenRouter and displays the answer as Markdown in
-the terminal. Each request is independent: Ask reads only the files you explicitly
-attach and does not save conversation history. A project profile is not required.
+the terminal. Ask reads only files you explicitly attach. Honcho memory requires
+an active project; temporary requests do not.
 
 Empty questions, missing configuration, authentication failures, timeouts, and
 other provider failures produce a readable error and a nonzero exit status for
@@ -212,7 +214,9 @@ Selections apply only to the current question.
 Before the request, Synapse prints every attached path and its size. The selected
 files' contents are sent with your question to OpenRouter and, if needed, to the
 Google AI Studio fallback. Both receive the same snapshot. Answers are still
-rendered only in the terminal; no answer or attachment history is saved.
+rendered in the terminal. Raw attachment contents are omitted from the user
+messages stored in Honcho, but saved answers can contain file excerpts. Reattach
+files when a later question needs their contents.
 
 Attachments must be UTF-8 text: at most 10 files, 64 KiB per file, and 256 KiB
 combined. Missing, unreadable, binary, and out-of-workspace files are rejected
@@ -251,6 +255,97 @@ key, only OpenRouter is used. Setting a Google key requires `GEMINI_MODEL` as we
 
 This uses Google's documented [OpenAI-compatible Gemini endpoint](https://ai.google.dev/gemini-api/docs/openai)
 through the existing SDK; no additional dependency is needed.
+
+## Honcho conversation memory
+
+Install the updated dependencies with `python -m pip install -e ".[dev]"`, then
+set your key in `.env`:
+
+```dotenv
+HONCHO_API_KEY=your-honcho-key
+# Optional: a self-hosted Honcho API URL
+# HONCHO_URL=https://api.honcho.dev
+```
+
+Use a key that can access/create project workspaces. Synapse derives a separate
+Honcho workspace from each project's stable ID, memory namespace, and revision.
+It intentionally does not use a shared `HONCHO_WORKSPACE_ID`. Conversations live
+in Honcho, while the local project registry stays in `~/.synapse/projects.json`.
+SQLite at `~/.synapse/memory.sqlite3` stores completed exchanges, cached context,
+and a pending-upload queue. Override this path with `SYNAPSE_MEMORY_DB`.
+
+In TUI Ask, choose **New conversation**, **Resume conversation**, or **Temporary
+conversation**. Resume lists sessions only from the active project, with page
+navigation. Use `/conversation` during Ask to change conversations. Returning to
+the launcher discards temporary history; saved Honcho sessions remain resumable.
+With an active project, conversations are saved locally even without a Honcho key.
+They are queued for upload once Honcho is configured. Without a selected project,
+TUI Ask uses a temporary conversation.
+
+```bash
+# With Honcho configured, start a new conversation and print its ID
+python -m synapse ask "For this project, keep changes small" --new-conversation
+
+# Use the ID shown in the previous request's diagnostics
+python -m synapse ask "What approach did we agree on?" --conversation SESSION_ID
+
+# Explicitly skip persistent memory
+python -m synapse ask "Explain decorators" --temporary
+```
+
+With an active project, plain CLI Ask starts a new conversation saved locally;
+use `--conversation` for follow-ups. `--new-conversation` works offline too.
+Use `--temporary` to opt out of persistent storage and uploads. Without a project
+or a configured Honcho key, plain CLI Ask remains an independent request.
+
+Before generation, Synapse requests up to 3,000 tokens of session context,
+including summaries, recent messages, and relevant user representation. It also
+applies a 16,000-character ceiling locally. The same snapshot goes to OpenRouter
+and to Gemini if fallback is needed. Memory is supporting context, not a source
+of guaranteed facts or current file contents.
+
+After a successful answer, Synapse writes the original question and answer to
+SQLite in one transaction before attempting upload. Raw file attachments are
+omitted; saved answers can still contain excerpts. Failed model requests do not
+create completed exchanges. If Honcho is offline, Ask uses cached local context
+and continues saving exchanges locally across restarts. Remote summaries and
+recent context retrieved while online are cached for offline use; this cache is
+bounded, so it is not a complete mirror of historical remote-only conversations.
+
+Pending uploads are retried before the next question in that conversation and
+after saving an answer. To synchronize all queued conversations in the active
+project, use **Sync pending project memory** in the conversation menu or run:
+
+```bash
+python -m synapse memory status
+python -m synapse memory sync
+```
+
+There is no background daemon: synchronization runs while you use these controls
+or Ask. Status messages distinguish local/offline storage, pending uploads, and
+completed synchronization. Local history remains after successful upload.
+Removing a project profile deletes neither its local memory nor its remote memory.
+
+Every exchange has a unique ID stored in Honcho message metadata. Sync workers
+sharing one database are serialized with a local file lock (POSIX platforms).
+Before upload, Synapse looks for the exchange's user and assistant messages,
+checking their contents, and skips confirmed messages. This supports recovery
+when Honcho accepted an exchange but the response was lost.
+
+Honcho does not currently document atomic idempotency keys for ingestion. If an
+attempt was marked as uploading but its messages cannot be confirmed remotely,
+Synapse retains it locally and does not automatically resend it. This prevents
+blind retries but means unresolved uploads can require investigation; later
+exchanges stay queued behind them. Multiple machines with independent database
+copies are not a supported concurrent synchronization configuration.
+
+A local database failure is reported explicitly. A generated answer is still
+shown if its save fails, but Synapse does not claim it was persisted. Temporary
+conversations never write to SQLite or Honcho.
+
+Honcho calls use a 10-second SDK timeout and zero automatic retries. One logical
+operation may involve multiple SDK requests. This integration follows Honcho's
+[session context API](https://honcho.dev/docs/v3/documentation/features/get-context).
 
 ## Test
 

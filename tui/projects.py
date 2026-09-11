@@ -49,7 +49,7 @@ async def manage_project(action, console):
             for label, value in [('Project', project.name), ('ID', project.id), ('Workspace', project.workspace_root),
                                  ('Memory namespace', project.memory_namespace), ('Created', project.created_at), ('Last used', project.last_used_at)]:
                 console.print(Text(f'{label}: {value}'))
-            console.print('Memory storage is not enabled yet.', style='dim')
+            console.print('Honcho memory is scoped to this project when configured.', style='dim')
     except ProjectError as error:
         console.print(f'Error: {error}', style='red', markup=False)
 

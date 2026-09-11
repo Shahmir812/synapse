@@ -38,6 +38,11 @@ def main() -> None:
 
     ask_parser.add_argument("--file", action="append", default=[], metavar="PATH", help="Attach a workspace text file; repeat for multiple files")
 
+    memory_options = ask_parser.add_mutually_exclusive_group()
+    memory_options.add_argument("--new-conversation", action="store_true", help="Start a new Honcho conversation")
+    memory_options.add_argument("--conversation", metavar="ID", help="Resume a Honcho conversation in the active project")
+    memory_options.add_argument("--temporary", action="store_true", help="Ask without persistent memory")
+
     project_parser = subparsers.add_parser("project", help="Manage Synapse project profiles")
     project_subparsers = project_parser.add_subparsers(dest="project_command")
 
@@ -63,7 +68,26 @@ def main() -> None:
     remove_parser = project_subparsers.add_parser("remove", help="Remove a profile without deleting its folder")
     remove_parser.add_argument("project_id")
 
+    memory_parser = subparsers.add_parser("memory", help="Inspect or synchronize local project memory")
+    memory_parser.add_argument("action", choices=["status", "sync"])
+
     args = parser.parse_args()
+    if args.command == "memory":
+        from synapse.memory import project_scope, sync_pending, MemoryError
+        from synapse.local_memory import pending, database_path, LocalMemoryError
+        try:
+            scope = project_scope()
+            console = Console()
+            if args.action == "sync":
+                console.print(sync_pending(scope), markup=False)
+            else:
+                console.print(f"Local memory: {database_path()}", markup=False)
+                console.print(f"Pending exchanges in this project: {len(pending(scope))}")
+        except (MemoryError, LocalMemoryError, ProjectError) as error:
+            Console(stderr=True).print(str(error), style="red", markup=False)
+            raise SystemExit(1) from error
+        return
+
 
     if args.command == "ask":
         from rich.markdown import Markdown
@@ -71,13 +95,19 @@ def main() -> None:
         from synapse.ask import AskError, ask_question
         from synapse.model import ModelConfigError
         from synapse.file_context import FileContextError
+        from synapse.memory import MemoryError, open_conversation, configured
+        from synapse.local_memory import LocalMemoryError
+        from synapse.project_registry import current_project
 
         try:
+            conversation = None
+            if not args.temporary and (current_project() is not None or configured() or args.new_conversation or args.conversation):
+                conversation = open_conversation(args.conversation)
             answer = ask_question(
-                args.question, files=args.file,
+                args.question, files=args.file, conversation=conversation,
                 on_status=lambda message: Console(stderr=True).print(message, style="dim", markup=False),
             )
-        except (AskError, ModelConfigError, FileContextError, ProjectError) as error:
+        except (AskError, ModelConfigError, FileContextError, ProjectError, MemoryError, LocalMemoryError) as error:
             Console(stderr=True).print(f"Error: {error}", style="red", markup=False)
             raise SystemExit(1) from error
         Console().print(Markdown(answer))

@@ -9,6 +9,8 @@ description = "AI-powered coding agent CLI with optional Telegram interface"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    "honcho-ai>=2.2,<3",
+    "httpx>=0.27,<1",
     "pyfiglet>=1.0,<2",
     "openai>=2.0,<3",
     "python-dotenv>=1.0,<2",

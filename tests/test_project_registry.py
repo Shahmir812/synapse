@@ -142,7 +142,7 @@ def test_tui_create_rename_details_and_switch(tmp_path, monkeypatch):
     asyncio.run(projects.manage_project('details', console))
     assert registry.current_project().name == 'Renamed'
     assert first.memory_namespace in output.getvalue()
-    assert 'Memory storage is not enabled yet' in output.getvalue()
+    assert 'Honcho memory is scoped to this project' in output.getvalue()
 
 
 def test_tui_cancel_create_no_write(monkeypatch):

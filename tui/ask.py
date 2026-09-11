@@ -13,6 +13,9 @@ from tui.theme import ACCENT, PROMPT_STYLE
 
 from synapse.ask import AskError, ask_question
 from synapse.model import ModelConfigError
+from synapse.memory import MemoryError
+from synapse.local_memory import LocalMemoryError
+from tui.conversations import choose_conversation
 from synapse.projects import ProjectError
 from synapse.project_registry import active_workspace
 from synapse.file_context import FileContextError, selectable_files
@@ -21,13 +24,23 @@ from synapse.file_context import FileContextError, selectable_files
 async def run_ask_mode(console: Console) -> None:
     console.print(Panel(
         "Ask a question and get an answer in your terminal.\n"
-        "Each question is independent. Type /back to return to the menu.",
+        "Type /conversation to start or resume a conversation; /back returns to the menu.",
         title="Ask Mode", border_style=ACCENT, padding=(1, 2),
     ))
+    conversation = await choose_conversation(console)
+    if conversation is None:
+        return
+    console.print(f"Conversation: {conversation.id}", style="dim", markup=False)
     while True:
         question = await questionary.text("Ask a question:", style=PROMPT_STYLE).ask_async()
         if question is None or question.strip().lower() == "/back":
             return
+        if question.strip().lower() == '/conversation':
+            selected = await choose_conversation(console)
+            if selected is not None:
+                conversation = selected
+                console.print(f"Conversation: {conversation.id}", style="dim", markup=False)
+            continue
         if not question.strip():
             console.print("Please enter a question.", style="yellow")
             continue
@@ -60,10 +73,10 @@ async def run_ask_mode(console: Console) -> None:
         try:
             with console.status("Waiting for model response…", spinner="dots", spinner_style=ACCENT):
                 answer = await asyncio.to_thread(
-                    ask_question, question.strip(), files=files,
+                    ask_question, question.strip(), files=files, conversation=conversation,
                     on_status=lambda message: console.print(message, style="dim", markup=False),
                 )
-        except (AskError, ModelConfigError, FileContextError, ProjectError) as error:
+        except (AskError, ModelConfigError, FileContextError, ProjectError, MemoryError, LocalMemoryError) as error:
             console.print(f"Error: {error}", style="red", markup=False)
             continue
         console.print()
