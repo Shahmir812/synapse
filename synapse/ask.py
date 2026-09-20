@@ -7,6 +7,7 @@ from time import monotonic
 from pathlib import Path
 from synapse.memory import Conversation, MemoryError
 from synapse.local_memory import LocalMemoryError
+from synapse.exploration import Exploration, ExplorationError, inspect_workspace
 from synapse.project_registry import active_workspace
 from synapse.file_context import load_attachments, attach_to_question
 
@@ -22,13 +23,21 @@ class AskError(Exception):
     """An Ask request could not produce an answer."""
 
 
-def ask_question(question: str, *, files: list[str | Path] | None = None, conversation: Conversation | None = None, on_status: Callable[[str], None] | None = None) -> str:
+def ask_question(question: str, *, files: list[str | Path] | None = None, conversation: Conversation | None = None, explore: bool = False, expected_workspace: Path | None = None, cancel_event=None, on_status: Callable[[str], None] | None = None) -> str:
     question = question.strip()
     if not question:
         raise AskError("Question must not be empty.")
 
     report = on_status or (lambda message: None)
-    attachments = load_attachments(files or [], active_workspace())
+    workspace = active_workspace()
+    if expected_workspace is not None and workspace != Path(expected_workspace).resolve():
+        raise AskError('Active workspace changed. Choose the project again before sending this question.')
+    if explore:
+        try:
+            inspect_workspace(workspace)
+        except ExplorationError as error:
+            raise AskError(str(error)) from error
+    attachments = load_attachments(files or [], workspace)
     if attachments:
         report(f"Sending {len(attachments)} file(s) as context to the model (including fallback if needed):")
         for item in attachments:
@@ -36,17 +45,25 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
     original_question = question
     history = conversation.context(question) if conversation else []
     if conversation:
-        report(conversation.status)
-        report(f"Memory: {'temporary' if conversation.temporary else 'Honcho'} | conversation: {conversation.id}")
+        if not conversation.temporary:
+            report(conversation.status)
+        report(f"Memory: {'temporary' if conversation.temporary else 'project conversation'} | conversation: {conversation.id}")
         report(f"Loaded {len(history)} context messages; file attachments are not stored as messages.")
     question = attach_to_question(question, attachments)
+    exploration = Exploration(workspace, question, history, cancel_event) if explore else None
+    if explore:
+        report(f"Workspace exploration enabled: {workspace} (read-only)")
     # Keep the same memory snapshot through provider fallback.
     def request(provider, factory, endpoint, model_setting, key_setting):
+        if exploration is not None:
+            return _request(question, report, provider, factory, endpoint, model_setting, key_setting, history, exploration)
         if history:
             return _request(question, report, provider, factory, endpoint, model_setting, key_setting, history)
         return _request(question, report, provider, factory, endpoint, model_setting, key_setting)
     try:
         answer = request("OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
+    except ExplorationError as error:
+        raise AskError(str(error)) from error
     except (AskError, ModelConfigError) as primary_error:
         if not gemini_is_configured():
             raise
@@ -54,9 +71,13 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
         report("Falling back to Google AI Studio…")
         try:
             answer = request("Google AI Studio", create_gemini_client, GEMINI_BASE_URL, "GEMINI_MODEL", "GEMINI_API_KEY")
+        except ExplorationError as error:
+            raise AskError(str(error)) from error
         except (AskError, ModelConfigError) as fallback_error:
             raise AskError(f"Both providers failed. OpenRouter: {primary_error} Google AI Studio: {fallback_error}") from fallback_error
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise AskError("Ask request cancelled.")
     if conversation:
         try:
             conversation.save(original_question, answer)
@@ -66,14 +87,14 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
     return answer
 
 
-def _request(question, report, provider, factory, endpoint, model_setting, key_setting, history=None) -> str:
+def _request(question, report, provider, factory, endpoint, model_setting, key_setting, history=None, exploration=None) -> str:
     client, model = factory()
     started = monotonic()
     report(f"{provider}: trying model {model} ({model_setting})")
     report(f"Endpoint: {endpoint} | timeout: 30s | automatic retries: 0")
     try:
         with client:
-            response = client.chat.completions.create(
+            response = exploration.run(client, model, report) if exploration is not None else client.chat.completions.create(
                 model=model,
                 messages=(history or []) + [{"role": "user", "content": question}],
             )

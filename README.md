@@ -32,8 +32,9 @@ review the result. Synapse aims to bring those steps into one terminal workflow:
   same core capabilities to coordinated workflows and a Telegram interface.
 
 These are the intended capabilities. The current Ask mode answers the question
-you supply and can use text files you explicitly attach. It does not yet explore
-your codebase on its own or edit files. Honcho can retain and resume project conversations.
+you supply and can use text files you explicitly attach. Explore mode can list,
+read, and search workspace files. It cannot edit files or run commands yet.
+Honcho can retain and resume project conversations.
 
 ## What works today
 
@@ -101,8 +102,8 @@ python -m synapse project status
 python -m synapse project list
 ```
 
-The launcher has one **Manage projects** submenu containing Create, Switch,
-Details, Rename, Delete, and Back.
+The launcher has one **Manage projects** submenu containing Create, Open existing
+folder, Switch, Details, Rename, Delete, and Back.
 
 **Create project** asks for a name and creates its workspace at
 `CORE_DIR/Projects/<name>`. `CORE_DIR` defaults to the Synapse application root
@@ -111,6 +112,8 @@ choose a different base folder. The `Projects` directory is created if needed.
 Whitespace becomes underscores: `My Project` becomes `Projects/My_Project`.
 Dots and underscores already in the name are preserved. Path separators and
 hidden/traversal names are rejected. Existing folders are never overwritten.
+New projects start with an empty folder; creating a project does not copy the
+Synapse source code or other projects into it.
 
 ```bash
 python -m synapse project create "My Project"
@@ -123,8 +126,10 @@ project selects another saved project (preferring an existing workspace); removi
 the last one clears selection. Removed legacy profiles are not automatically
 re-imported. You can explicitly register their folders again with `project init`.
 Renaming changes only the display name, preserving the workspace path and identity.
-Existing projects remain in their original locations. `project init` remains the
-way to register an existing folder without creating or moving it.
+**Open existing folder** selects the directory containing your code in place.
+It reuses the saved identity and memory if that directory is already registered.
+The equivalent CLI command is `project init` for a new registration, or
+`project use` to select a saved project.
 
 Register another workspace or select and rename a saved project from the CLI:
 
@@ -188,6 +193,65 @@ the answer.
 Requests use a 30-second SDK timeout with automatic retries disabled.
 The `project` and `wakeup` commands do not require model configuration.
 The other settings in `.env.example` are reserved for future features.
+
+## Explore the workspace with Ask
+
+In `python -m synapse wakeup`:
+
+1. Choose **Ask · Explore workspace (read-only)**.
+2. Check the displayed project and absolute workspace path. Choose **Use this
+   workspace**, **Switch saved project**, or **Open existing folder**.
+3. Review the file preview, then start or resume a conversation for that project.
+4. Ask your question. Attachments are optional; Explore finds relevant files itself.
+
+To ask about Synapse's own SQLite/Honcho implementation, select the
+`synapse-first-commit` repository folder containing `synapse/memory.py` and
+`synapse/local_memory.py`. A new folder under `Projects/` is a separate workspace.
+The directory you launch Synapse from does not override the saved active project.
+
+If the bounded local scan finds no files visible to the tools, Explore returns
+you to workspace selection without contacting memory or a model. Excluded files
+do not count as available context. Missing folders and scan errors are reported.
+Ordinary Ask still works without workspace files.
+
+Type `/project` during Ask to select another workspace and choose its conversation.
+Previous temporary history is discarded when changing projects. If an optional
+attachment scan finds no eligible text files, your question continues without
+attachments; you do not need to type it again.
+
+Explore mode requires an initial workspace tool call to establish model context.
+Ask can then choose `list_files`, `read_file`, and `search_files` itself to answer
+questions about the active project's code. Each tool call and a result summary appears
+in the TUI. Ordinary **Ask Mode** remains available for questions and explicit
+attachments without automatic exploration.
+
+```bash
+python -m synapse ask "How does memory synchronization work?" --explore
+```
+
+The same conversation and attachment options work with `--explore`, including
+`--temporary` and `--conversation`. File contents and search results are sent to
+the answer provider. Only the user's question and final answer are saved to
+conversation memory; the tool transcript is not persisted, although answers can
+quote source code.
+
+The loop allows up to 8 model requests and 12 tool calls across both providers.
+If OpenRouter fails after tools run, Gemini receives the existing tool transcript;
+the loop does not restart or automatically repeat completed calls. Models must
+support function calling. Reaching a limit produces an error rather than saving
+an unfinished answer.
+
+All tools stay inside the active workspace and reuse sensitive-path exclusions.
+Symlinks, parent traversal, and absolute tool paths are rejected. Reads accept
+UTF-8 text up to 64 KiB and return a bounded excerpt. Listings return up to 200
+files; searches use literal text and return up to 50 matching lines, with a
+roughly 1 MiB file-read budget. Directory scans examine at most 2,000 entries.
+Each tool result is capped at 8,000 characters, and truncation is reported.
+These are bounded searches, not exhaustive codebase indexing.
+
+Ctrl+C cancels the run. An in-flight network request may take until its timeout
+to return, but cancellation stops further tool calls and prevents saving the
+cancelled answer. No file mutation or command-execution tools are exposed.
 
 ## Ask about multiple files
 

@@ -38,6 +38,8 @@ def main() -> None:
 
     ask_parser.add_argument("--file", action="append", default=[], metavar="PATH", help="Attach a workspace text file; repeat for multiple files")
 
+    ask_parser.add_argument("--explore", action="store_true", help="Let Ask list, read, and search files in the active workspace")
+
     memory_options = ask_parser.add_mutually_exclusive_group()
     memory_options.add_argument("--new-conversation", action="store_true", help="Start a new Honcho conversation")
     memory_options.add_argument("--conversation", metavar="ID", help="Resume a Honcho conversation in the active project")
@@ -100,11 +102,18 @@ def main() -> None:
         from synapse.project_registry import current_project
 
         try:
+            if args.explore:
+                from synapse.exploration import ExplorationError, inspect_workspace
+                from synapse.project_registry import active_workspace
+                try:
+                    inspect_workspace(active_workspace())
+                except ExplorationError as error:
+                    raise AskError(str(error)) from error
             conversation = None
             if not args.temporary and (current_project() is not None or configured() or args.new_conversation or args.conversation):
                 conversation = open_conversation(args.conversation)
             answer = ask_question(
-                args.question, files=args.file, conversation=conversation,
+                args.question, files=args.file, conversation=conversation, explore=args.explore,
                 on_status=lambda message: Console(stderr=True).print(message, style="dim", markup=False),
             )
         except (AskError, ModelConfigError, FileContextError, ProjectError, MemoryError, LocalMemoryError) as error:

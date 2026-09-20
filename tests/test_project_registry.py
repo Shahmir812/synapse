@@ -166,6 +166,7 @@ def test_tui_picker_uses_selected_workspace(tmp_path, monkeypatch):
         seen.append(root)
         return [], False
     monkeypatch.setattr(ask, 'selectable_files', candidates)
+    monkeypatch.setattr(ask, 'ask_question', lambda *args, **kwargs: 'Answer')
     asyncio.run(ask.run_ask_mode(Console(file=StringIO())))
     assert seen == [a]
 

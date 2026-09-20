@@ -57,6 +57,7 @@ async def run_wakeup() -> None:
             "Project launcher",
             choices=[
                 questionary.Choice("Ask Mode", value="ask"),
+                questionary.Choice("Ask · Explore workspace (read-only)", value="explore"),
                 questionary.Choice("Manage projects", value="manage"),
                 questionary.Choice("Exit", value="exit"),
             ],
@@ -65,9 +66,12 @@ async def run_wakeup() -> None:
         if choice is None or choice == "exit":
             console.print("\nGoodbye.\n", style="dim")
             return
-        if choice == "ask":
+        if choice in ("ask", "explore"):
             from tui.ask import run_ask_mode
-            await run_ask_mode(console)
+            if choice == "explore":
+                await run_ask_mode(console, explore=True)
+            else:
+                await run_ask_mode(console)
 
         elif choice == "manage":
             await manage_projects(console)

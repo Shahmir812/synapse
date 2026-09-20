@@ -10,7 +10,8 @@ from collections.abc import Iterable
 MAX_FILE_BYTES = 64 * 1024
 MAX_TOTAL_BYTES = 256 * 1024
 MAX_FILES = 10
-SKIP_DIRS = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', '.synapse', 'build', 'dist'}
+SKIP_DIRS = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', '.synapse',
+             '.pytest_cache', '.mypy_cache', '.ruff_cache', 'build', 'dist'}
 
 
 class FileContextError(Exception):
