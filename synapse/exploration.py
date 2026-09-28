@@ -154,14 +154,21 @@ def describe_result(output):
         summary = f"{len(result['files'])} file(s) found"
     elif 'matches' in result:
         summary = f"{len(result['matches'])} matching line(s) found"
-    elif 'path' in result:
+    elif 'path' in result and 'content' in result:
         summary = f"{result['path']}: {len(result['content'])} characters read"
+    elif 'status' in result:
+        summary = str(result['status'])
     else:
         summary = f'{len(output)} characters returned'
     return summary + (' · truncated' if result.get('truncated') else '')
 
 
 class Exploration:
+    tool_schemas = TOOLS
+    max_rounds = MAX_ROUNDS
+    max_calls = MAX_CALLS
+    label = 'Exploration'
+
     def __init__(self, root, question, history, cancel_event=None):
         self.cancel_event = cancel_event
         self.tools = WorkspaceTools(root)
@@ -201,12 +208,15 @@ class Exploration:
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise ExplorationError("Workspace exploration cancelled.")
 
+    def execute_call(self, call):
+        return self.tools.execute(call.function.name, call.function.arguments)
+
     def run(self, client, model, report):
-        while self.rounds < MAX_ROUNDS:
+        while self.rounds < self.max_rounds:
             self.check_cancelled()
             self.rounds += 1
-            report(f'Exploration: model round {self.rounds}/{MAX_ROUNDS}')
-            response = client.chat.completions.create(model=model, messages=self.messages, tools=TOOLS,
+            report(f'{self.label}: model round {self.rounds}/{self.max_rounds}')
+            response = client.chat.completions.create(model=model, messages=self.messages, tools=self.tool_schemas,
                                                       tool_choice="required" if self.calls == 0 else "auto")
             if not response.choices:
                 raise ExplorationError('The model returned no choices during exploration.')
@@ -214,7 +224,7 @@ class Exploration:
             calls = message.tool_calls or []
             if not calls:
                 return response
-            if len(calls) + self.calls > MAX_CALLS:
+            if len(calls) + self.calls > self.max_calls:
                 raise ExplorationError('Workspace exploration reached its tool-call limit. Narrow your question.')
             ids = [call.id for call in calls]
             if len(ids) != len(set(ids)) or any(not id for id in ids):
@@ -225,8 +235,8 @@ class Exploration:
             for call in calls:
                 self.check_cancelled()
                 self.calls += 1
-                report(f'Tool {self.calls}/{MAX_CALLS}: {call.function.name} {call.function.arguments[:300]}')
-                output = self.tools.execute(call.function.name, call.function.arguments)
+                report(f'Tool {self.calls}/{self.max_calls}: {call.function.name}')
+                output = self.execute_call(call)
                 report(f'Tool result: {describe_result(output)}')
                 self.messages.append({'role':'tool', 'tool_call_id':call.id, 'content':output})
-        raise ExplorationError('Workspace exploration reached its model-round limit. Narrow your question.')
+        raise ExplorationError(f'{self.label} reached its model-round limit. Narrow your question.')

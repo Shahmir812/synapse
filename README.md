@@ -33,8 +33,8 @@ review the result. Synapse aims to bring those steps into one terminal workflow:
 
 These are the intended capabilities. The current Ask mode answers the question
 you supply and can use text files you explicitly attach. Explore mode can list,
-read, and search workspace files. It cannot edit files or run commands yet.
-Honcho can retain and resume project conversations.
+read, and search workspace files. Agent Mode adds plans, reviewed file changes,
+and approved command execution. Honcho can retain and resume project conversations.
 
 ## What works today
 
@@ -43,6 +43,7 @@ Honcho can retain and resume project conversations.
 | Terminal launcher | Animated Synapse banner, workspace and configured model details, and an interactive Ask menu |
 | Project profiles | Create, switch, rename, and inspect projects from the CLI or TUI; share the active workspace across launches |
 | Ask from the CLI or TUI | Attach multiple workspace text files, send a question to a real model, and render its answer as Markdown in the terminal |
+| Agent Mode | Plan tasks, inspect code, create/edit/delete files after diff review, run approved commands, and iterate on test failures |
 | Provider fallback | Try OpenRouter first, then Google AI Studio when configured and needed |
 | Request visibility | Show the requested and responding models, endpoint, elapsed time, token usage when available, and readable failures |
 | Automated verification | Test requests and failure paths with mocked HTTP responses, without API charges |
@@ -50,6 +51,65 @@ Honcho can retain and resume project conversations.
 Honcho conversations persist questions and answers. Temporary TUI conversations
 keep recent context only until you leave Ask mode.
 Project metadata is stored locally, separately from model requests.
+
+## Agent Mode
+
+Run `python -m synapse wakeup` and choose **Agent Mode · edit and run with review**.
+Select your workspace, choose a saved or temporary conversation, and describe the
+task. Empty project folders are supported for building something new.
+
+```bash
+python -m synapse agent "Add input validation to the parser and test the edge cases"
+python -m synapse agent "Create a Python calculator with tests" --temporary
+python -m synapse agent "Continue implementing the parser" --conversation CONVERSATION_ID
+```
+
+The agent can update a visible plan, list/search files, read numbered file sections,
+create files, make exact text replacements, delete individual files, and run commands.
+It receives command output and exit codes so it can fix failures and verify again.
+OpenRouter and the configured Google AI Studio fallback use the same run and tool
+results. A provider failure does not replay completed actions.
+
+Every file change displays its proposed diff before it is applied. Every command
+shows its argument array, working directory, reason, and timeout. In the TUI,
+choose **Approve once**, **Reject action**, or **Stop this run**. CLI approvals use
+`y`/`yes`; other answers deny the action. Noninteractive invocations cannot approve
+changes or commands. There is no blanket auto-approve option.
+
+File tools reject traversal, symlinks, sensitive paths and files larger than 64 KiB.
+Edits require a prior read and fail if the file changed before approval completed.
+Existing file permissions are preserved. New-file creation never overwrites an
+existing file. Changes are applied individually, not as an all-or-nothing transaction.
+
+Commands run without implicit shell expansion, from the selected workspace, with
+a reduced environment that does not inherit provider API keys. They run with your
+user account's permissions: **this is not an operating-system sandbox**. Approved
+programs may read files outside the workspace, access the network, or read credentials
+from disk. Review commands accordingly. The command runner targets macOS/Linux;
+it attempts process-group cleanup on cancellation. If a host blocks group signals,
+it stops the direct child and reports that descendant cleanup could not be confirmed.
+
+Each run allows up to 24 model requests and 48 tool calls across providers.
+Commands default to a 60-second timeout (maximum 120 seconds), return at most
+8,000 bytes of captured output, and stop if output exceeds 128 KiB. Commands are
+noninteractive; stdin is closed. A local `.venv/bin` is preferred on `PATH`.
+
+Use `/project` or `/conversation` between tasks in the TUI; `/back` leaves Agent
+Mode. Ctrl+C cancels the current run; an in-flight model request may take until
+its timeout to return. Approved changes already applied stay on disk. Nothing is
+committed, pushed, or automatically rolled back by the runner.
+
+Run records are written to `<workspace>/.synapse/agent-runs/agent-<id>.json` and
+the final result shows the record path and actual action outcomes. Records contain
+the plan, reviewed diffs, approvals/denials, and bounded command results. They are
+local diagnostic records, not resumable execution checkpoints. A hard interruption
+may leave a record marked `running`; inspect the files before starting again.
+The repository ignores `.synapse/` in Git.
+
+`--temporary` disables conversation persistence, but still keeps this local action
+record. Saved conversations retain the task and final answer in SQLite/Honcho;
+raw tool transcripts and the full run record are not uploaded to memory. A later
+task can resume the conversation and inspect the current files afresh.
 
 ## Building principles
 

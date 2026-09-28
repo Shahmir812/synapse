@@ -8,7 +8,7 @@ from pathlib import Path
 from synapse.memory import Conversation, MemoryError
 from synapse.local_memory import LocalMemoryError
 from synapse.exploration import Exploration, ExplorationError, inspect_workspace
-from synapse.project_registry import active_workspace
+from synapse.project_registry import active_workspace, current_project
 from synapse.file_context import load_attachments, attach_to_question
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
@@ -23,13 +23,16 @@ class AskError(Exception):
     """An Ask request could not produce an answer."""
 
 
-def ask_question(question: str, *, files: list[str | Path] | None = None, conversation: Conversation | None = None, explore: bool = False, expected_workspace: Path | None = None, cancel_event=None, on_status: Callable[[str], None] | None = None) -> str:
+def ask_question(question: str, *, files: list[str | Path] | None = None, conversation: Conversation | None = None, explore: bool = False, agent: bool = False, approve=None, expected_workspace: Path | None = None, cancel_event=None, on_status: Callable[[str], None] | None = None) -> str:
     question = question.strip()
     if not question:
         raise AskError("Question must not be empty.")
 
     report = on_status or (lambda message: None)
     workspace = active_workspace()
+    if agent and explore:
+        raise AskError('Select either Agent Mode or read-only exploration.')
+    selected_project = current_project() if agent else None
     if expected_workspace is not None and workspace != Path(expected_workspace).resolve():
         raise AskError('Active workspace changed. Choose the project again before sending this question.')
     if explore:
@@ -51,6 +54,19 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
         report(f"Loaded {len(history)} context messages; file attachments are not stored as messages.")
     question = attach_to_question(question, attachments)
     exploration = Exploration(workspace, question, history, cancel_event) if explore else None
+    if agent:
+        from synapse.agent import Agent, AgentError
+        def check_scope():
+            project = current_project()
+            identity = lambda p: (p.id, p.memory_revision) if p else None
+            if active_workspace() != workspace or identity(project) != identity(selected_project):
+                raise AgentError('Active project changed. Start a new agent run for the selected workspace.')
+        try:
+            exploration = Agent(workspace, question, history, approve, cancel_event, report, check_scope)
+        except ExplorationError as error:
+            raise AskError(str(error)) from error
+        report(f'Agent workspace: {workspace}')
+        report(f'Run record: {exploration.record.path}')
     if explore:
         report(f"Workspace exploration enabled: {workspace} (read-only)")
     # Keep the same memory snapshot through provider fallback.
@@ -61,23 +77,19 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
             return _request(question, report, provider, factory, endpoint, model_setting, key_setting, history)
         return _request(question, report, provider, factory, endpoint, model_setting, key_setting)
     try:
-        answer = request("OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
-    except ExplorationError as error:
-        raise AskError(str(error)) from error
-    except (AskError, ModelConfigError) as primary_error:
-        if not gemini_is_configured():
-            raise
-        report(f"OpenRouter failed: {primary_error}")
-        report("Falling back to Google AI Studio…")
-        try:
-            answer = request("Google AI Studio", create_gemini_client, GEMINI_BASE_URL, "GEMINI_MODEL", "GEMINI_API_KEY")
-        except ExplorationError as error:
-            raise AskError(str(error)) from error
-        except (AskError, ModelConfigError) as fallback_error:
-            raise AskError(f"Both providers failed. OpenRouter: {primary_error} Google AI Studio: {fallback_error}") from fallback_error
+        answer = _with_fallback(request, report)
+        if cancel_event is not None and cancel_event.is_set():
+            raise AskError("Ask request cancelled.")
+        if agent:
+            exploration.record.finish('finished')
+            answer += '\n\n' + exploration.record.summary()
+    except BaseException as error:
+        if agent:
+            cancelled = isinstance(error, KeyboardInterrupt) or cancel_event is not None and cancel_event.is_set()
+            exploration.record.finish('cancelled' if cancelled else 'failed')
+            report(exploration.record.summary())
+        raise
 
-    if cancel_event is not None and cancel_event.is_set():
-        raise AskError("Ask request cancelled.")
     if conversation:
         try:
             conversation.save(original_question, answer)
@@ -86,6 +98,23 @@ def ask_question(question: str, *, files: list[str | Path] | None = None, conver
             report(f"Warning: answer generated, but memory save was not confirmed. {error}")
     return answer
 
+
+def _with_fallback(request, report):
+    try:
+        return request("OpenRouter", create_model_client, OPENROUTER_BASE_URL, "OPENROUTER_DEFAULT_MODEL", "OPENROUTER_API_KEY")
+    except ExplorationError as error:
+        raise AskError(str(error)) from error
+    except (AskError, ModelConfigError) as primary_error:
+        if not gemini_is_configured():
+            raise
+        report(f"OpenRouter failed: {primary_error}")
+        report("Falling back to Google AI Studio…")
+        try:
+            return request("Google AI Studio", create_gemini_client, GEMINI_BASE_URL, "GEMINI_MODEL", "GEMINI_API_KEY")
+        except ExplorationError as error:
+            raise AskError(str(error)) from error
+        except (AskError, ModelConfigError) as fallback_error:
+            raise AskError(f"Both providers failed. OpenRouter: {primary_error} Google AI Studio: {fallback_error}") from fallback_error
 
 def _request(question, report, provider, factory, endpoint, model_setting, key_setting, history=None, exploration=None) -> str:
     client, model = factory()

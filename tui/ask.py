@@ -25,7 +25,7 @@ from synapse.file_context import FileContextError, selectable_files
 
 
 async def cancellable_ask(function, *args, **kwargs):
-    cancellation = Event()
+    cancellation = kwargs.pop('cancel_event', None) or Event()
     try:
         return await asyncio.to_thread(function, *args, **kwargs, cancel_event=cancellation)
     except BaseException:

@@ -45,6 +45,15 @@ def main() -> None:
     memory_options.add_argument("--conversation", metavar="ID", help="Resume a Honcho conversation in the active project")
     memory_options.add_argument("--temporary", action="store_true", help="Ask without persistent memory")
 
+    agent_parser = subparsers.add_parser('agent', help='Complete a coding task with reviewed edits and commands')
+    agent_parser.add_argument('question', help='Coding task (wrap it in quotes)')
+    agent_parser.add_argument('--file', action='append', default=[], metavar='PATH', help='Attach a workspace text file')
+    agent_parser.set_defaults(explore=False)
+    agent_memory = agent_parser.add_mutually_exclusive_group()
+    agent_memory.add_argument('--new-conversation', action='store_true', help='Start a saved project conversation')
+    agent_memory.add_argument('--conversation', metavar='ID', help='Resume a project conversation')
+    agent_memory.add_argument('--temporary', action='store_true', help='Do not persist conversation memory')
+
     project_parser = subparsers.add_parser("project", help="Manage Synapse project profiles")
     project_subparsers = project_parser.add_subparsers(dest="project_command")
 
@@ -91,10 +100,11 @@ def main() -> None:
         return
 
 
-    if args.command == "ask":
+    if args.command in ('ask', 'agent'):
         from rich.markdown import Markdown
 
         from synapse.ask import AskError, ask_question
+        from synapse.exploration import ExplorationError
         from synapse.model import ModelConfigError
         from synapse.file_context import FileContextError
         from synapse.memory import MemoryError, open_conversation, configured
@@ -102,6 +112,10 @@ def main() -> None:
         from synapse.project_registry import current_project
 
         try:
+            agent_options = {}
+            if args.command == 'agent':
+                from tui.agent import cli_approval
+                agent_options = {'agent': True, 'approve': cli_approval(Console(stderr=True))}
             if args.explore:
                 from synapse.exploration import ExplorationError, inspect_workspace
                 from synapse.project_registry import active_workspace
@@ -115,8 +129,12 @@ def main() -> None:
             answer = ask_question(
                 args.question, files=args.file, conversation=conversation, explore=args.explore,
                 on_status=lambda message: Console(stderr=True).print(message, style="dim", markup=False),
+                **agent_options,
             )
-        except (AskError, ModelConfigError, FileContextError, ProjectError, MemoryError, LocalMemoryError) as error:
+        except KeyboardInterrupt:
+            Console(stderr=True).print('Cancelled. Any approved changes already applied remain on disk.', markup=False)
+            raise SystemExit(130) from None
+        except (AskError, ExplorationError, ModelConfigError, FileContextError, ProjectError, MemoryError, LocalMemoryError) as error:
             Console(stderr=True).print(f"Error: {error}", style="red", markup=False)
             raise SystemExit(1) from error
         Console().print(Markdown(answer))

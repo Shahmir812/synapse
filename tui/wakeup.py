@@ -58,6 +58,7 @@ async def run_wakeup() -> None:
             choices=[
                 questionary.Choice("Ask Mode", value="ask"),
                 questionary.Choice("Ask · Explore workspace (read-only)", value="explore"),
+                questionary.Choice("Agent Mode · edit and run with review", value="agent"),
                 questionary.Choice("Manage projects", value="manage"),
                 questionary.Choice("Exit", value="exit"),
             ],
@@ -73,6 +74,10 @@ async def run_wakeup() -> None:
             else:
                 await run_ask_mode(console)
 
+        elif choice == 'agent':
+            from tui.agent import run_agent_mode
+            await run_agent_mode(console)
+            show_workspace(console)
         elif choice == "manage":
             await manage_projects(console)
             show_workspace(console)
